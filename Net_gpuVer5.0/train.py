@@ -31,7 +31,48 @@ from utils.utils import get_optimizer
 from utils.utils import init_log
 # from utils.utils import save_checkpoint
 # from utils.utils import create_logger
-
+import cv2 as cv
+import numpy as np
+datapath='/home/mist/Face_Xray/data/'
+class mydataset(torch.utils.data.Dataset):
+    def __init__(self,blendpath,originpath):
+        self.imglist=[]
+        self.xraylist=[]
+        self.label=[]
+        self.trans_image =dataset.aug_trans.aug_trans.data_transform(normalize=True)
+        self.trans_xray = dataset.aug_trans.aug_trans.data_transform(normalize=False)
+        # for path in os.listdir('D:/Face_Xray/venv/facexray/Face_Xray/data/generatorBlendedRandomGaussian'):
+        #     self.imglist.append('D:/Face_Xray/venv/facexray/Face_Xray/data/generatorBlendedRandomGaussian'+'/'+path)
+        i=0
+        for path in os.listdir(blendpath):
+            if i%2==0:
+                self.imglist.append(blendpath+'/'+path)
+                self.label.append(1)
+            else:
+                self.xraylist.append(blendpath+'/'+path)
+            i+=1
+        for path in os.listdir(originpath):
+            self.imglist.append(originpath+'/'+path)
+            self.label.append(0)
+            self.xraylist.append('0')
+            i+=1
+    def __getitem__(self, index):
+        cls = self.label[index]
+        img=cv.imread(self.imglist[index])
+        img=cv.cvtColor(img,cv.COLOR_BGR2RGB)
+        if cls==0:
+            xray=np.zeros_like(img)
+        else:
+            xray=cv.imread(self.xraylist[index])
+        xray=cv.cvtColor(xray,cv.COLOR_BGR2GRAY)
+        origin_size=img.size
+        img = self.trans_image(image=img)['image']
+        xray = self.trans_xray(image=xray)['image']
+        xray=xray.unsqueeze(0)
+        name=self.imglist[index]
+        return img,xray,cls,np.array(origin_size),name
+    def __len__(self):
+        return len(self.label)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train classification network')
@@ -56,11 +97,11 @@ def parse_args():
     parser.add_argument('--testNNB',
                         help='testNNB',
                         type=str,
-                        default='')
+                        default='/home/mist/Face_Xray/data/hrnetv2_w18_imagenet_pretrained.pth')
     parser.add_argument('--testNNC',
                         help='testNNC',
                         type=str,
-                        default='/nas/hjr/nnc10CelebrityBlended.pth')
+                        default='')
 
     args = parser.parse_args()
     update_config(config, args)
@@ -98,8 +139,8 @@ def main():
     _print = logging.info
 
     gpus = list(config.GPUS)
-    nnb = torch.nn.DataParallel(nnb, device_ids=gpus).cuda()
-    nnc = torch.nn.DataParallel(nnc, device_ids=gpus).cuda()
+    nnb = torch.nn.DataParallel(nnb, device_ids=[0]).cuda()
+    nnc = torch.nn.DataParallel(nnc, device_ids=[0]).cuda()
 
     # define loss function (criterion) and optimizer
     criterion = Loss()
@@ -125,15 +166,17 @@ def main():
 
     # Data loading code
     # transform还没能适用于其他规格，应做成[256, 256, 3]
-    train_dataset = eval('dataset.' + config.DATASET.TRAIN_SET + '.' + config.DATASET.TRAIN_SET)(
-        root=config.DATASET.TRAIN_ROOT, list_name=config.DATASET.TRAIN_LIST, mode='train', Transform='simple')
+#     train_dataset = eval('dataset.' + config.DATASET.TRAIN_SET + '.' + config.DATASET.TRAIN_SET)(
+#         root=config.DATASET.TRAIN_ROOT, list_name=config.DATASET.TRAIN_LIST, mode='train', Transform='simple')
 
-    valid_dataset = eval('dataset.' + config.DATASET.EVAL_SET + '.' + config.DATASET.EVAL_SET)(
-        root=config.DATASET.VALID_ROOT, list_name=config.DATASET.VALID_LIST, mode='valid', Transform='simple')
+#     valid_dataset = eval('dataset.' + config.DATASET.EVAL_SET + '.' + config.DATASET.EVAL_SET)(
+#         root=config.DATASET.VALID_ROOT, list_name=config.DATASET.VALID_LIST, mode='valid', Transform='simple')
 
-    test_dataset = eval('dataset.' + config.DATASET.EVAL_SET + '.' + config.DATASET.EVAL_SET)(
-        root=config.DATASET.TEST_ROOT, list_name=config.DATASET.TEST_LIST, mode='test', Transform='simple')
-
+#     test_dataset = eval('dataset.' + config.DATASET.EVAL_SET + '.' + config.DATASET.EVAL_SET)(
+#         root=config.DATASET.TEST_ROOT, list_name=config.DATASET.TEST_LIST, mode='test', Transform='simple')
+    train_dataset=mydataset(datapath+'train15k',datapath+'origin5k')
+    valid_dataset=mydataset(datapath+'generatorBlendedRandomGaussian',datapath+'origin')
+    test_dataset=mydataset(datapath+'test1k',datapath+'test_o500')
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=config.TRAIN.BATCH_SIZE_PER_GPU*len(gpus),
@@ -169,8 +212,8 @@ def main():
     for iteration in range(last_iter, config.TRAIN.END_ITER, config.TRAIN.EVAL_ITER):
 
         # 前50000次迭代锁定原hrnet层参数训练，后面的迭代训练所有参数
-        if not NNB_GRAD and iteration > 20000:
-            if len(gpus) > 1:
+        if not NNB_GRAD and iteration >= 50000:
+            if len(gpus) > 0:
                 nnb.module.pretrained_grad(True)
             else:
                 nnb.pretrained_grad(True)
