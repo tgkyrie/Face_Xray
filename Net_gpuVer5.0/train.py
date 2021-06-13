@@ -65,6 +65,8 @@ class mydataset(torch.utils.data.Dataset):
         else:
             xray=cv.imread(self.xraylist[index])
         xray=cv.cvtColor(xray,cv.COLOR_BGR2GRAY)
+        xray=xray//128
+        xray=xray*256
         origin_size=img.size
         img = self.trans_image(image=img)['image']
         xray = self.trans_xray(image=xray)['image']
@@ -80,7 +82,8 @@ def parse_args():
     parser.add_argument('--cfg',
                         help='experiment configure file name',
                         type=str,
-                        default='./hrw18_adam_lr5e-2_bs32.yaml')
+#                         default='./hrw18_adam_lr5e-2_bs32.yaml')
+                        default='./hrw32.yaml')
 
     parser.add_argument('--modelDir',
                         help='model directory',
@@ -97,7 +100,8 @@ def parse_args():
     parser.add_argument('--testNNB',
                         help='testNNB',
                         type=str,
-                        default='/home/mist/Face_Xray/data/hrnetv2_w18_imagenet_pretrained.pth')
+#                         default='/home/mist/Face_Xray/data/hrnetv2_w18_imagenet_pretrained.pth')
+                        default='/home/mist/Face_Xray/data/hrnet_w32-36af842e.pth')
     parser.add_argument('--testNNC',
                         help='testNNC',
                         type=str,
